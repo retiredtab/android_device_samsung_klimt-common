@@ -40,4 +40,4 @@ TARGET_PROCESS_SDK_VERSION_OVERRIDE += \
     /system/vendor/bin/vcsFPService=22
 
 # Inherit from the proprietary version
--include vendor/samsung/klimt-common/BoardConfigVendor.mk
+include vendor/samsung/klimt-common/BoardConfigVendor.mk
