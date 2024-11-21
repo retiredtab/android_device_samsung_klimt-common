@@ -162,13 +162,16 @@
     <path name="main-mic">
         <path name="channel-left" />
         <path name="verb-voicecall" />
+        <ctl name="Sub Mic Switch" value="1" />
+        <ctl name="SPKOUTL Input 4" value="None" />
+        <ctl name="SPKOUTR Input 4" value="None" />
         <ctl name="MICBIAS Mode" value="BIAS2ON" />
         <ctl name="Main Mic Switch" value="1" />
-        <ctl name="LHPF1 Input 1" value="IN1L" />
+        <ctl name="LHPF1 Input 1" value="IN2L" />
         <ctl name="AIF2TX1 Input 1" value="ASRC1L" />
         <ctl name="AIF2TX2 Input 1" value="ASRC1R" />
-        <ctl name="IN1L Volume" value="19" />
-        <ctl name="IN1L Digital Volume" value="128" />
+        <ctl name="IN2L Volume" value="32" />
+        <ctl name="IN2L Digital Volume" value="128" />
         <ctl name="LHPF1 Input 1 Volume" value="32" />
     </path>
 
