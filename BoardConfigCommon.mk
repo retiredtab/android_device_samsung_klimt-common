@@ -35,6 +35,10 @@ TARGET_SCREEN_DENSITY := 320
 # HIDL
 DEVICE_MANIFEST_FILE += $(DEVICE_PATH)/manifest.xml
 
+# HIDL
+DEVICE_FRAMEWORK_COMPATIBILITY_MATRIX_FILE := \
+        vendor/lineage/config/device_framework_matrix.xml
+
 # Legacy blobs support
 TARGET_PROCESS_SDK_VERSION_OVERRIDE += \
     /system/vendor/bin/vcsFPService=22
