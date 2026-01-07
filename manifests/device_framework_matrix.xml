@@ -1,10 +1,9 @@
 <compatibility-matrix version="2.0" type="framework">
     <hal format="hidl">
-
+<!--
         <name>vendor.lineage.livedisplay</name>
         <transport>hwbinder</transport>
         <version>2.0</version>
-<!--
         <interface>
             <name>IAdaptiveBacklight</name>
             <instance>default</instance>
@@ -14,7 +13,6 @@
             <name>IDisplayColorCalibration</name>
             <instance>default</instance>
         </interface>
--->
         <interface>
             <name>IDisplayModes</name>
             <instance>default</instance>
@@ -24,6 +22,7 @@
             <instance>default</instance>
         </interface>
     </hal>
+-->
     <hal format="hidl">
         <name>vendor.lineage.touch</name>
         <transport>hwbinder</transport>
