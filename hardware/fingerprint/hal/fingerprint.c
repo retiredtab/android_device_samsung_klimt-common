@@ -29,6 +29,8 @@
 #include <hardware/hardware.h>
 #include <hardware/fingerprint.h>
 #include <unistd.h>
+#include <sys/socket.h>
+#include <sys/time.h>
 
 #include "fp_5420.h"
 
@@ -38,9 +40,12 @@
 #define SOCKET_NAME_RECEIVE "validityservice_callback"
 
 /******************************************************************************/
-static void checkinit(vcs_fingerprint_device_t* vdev) { //wait for hal connect validity service
-    while(!vdev->init)
-        sleep(1);
+// Never wait here: the HAL is called from system_server's main thread and ValidityService only
+// starts after system_server is up, so blocking deadlocks the boot (watchdog restarts).
+static worker_state_t getListenerState(vcs_fingerprint_device_t* dev);
+
+static bool checkinit(vcs_fingerprint_device_t* vdev) {
+    return vdev->init;
 }
 
 static int sendcommand(vcs_fingerprint_device_t* vdev, uint8_t* command, int num) {
@@ -65,12 +70,17 @@ static int initService(vcs_fingerprint_device_t* vdev) {
     ALOGV("----------------> %s ----------------->", __FUNCTION__);
     int ret = -EINVAL;
     while (vdev->send_fd <= 0) {
+        if (getListenerState(vdev) == STATE_EXIT)
+            return ret;
         vdev->send_fd = socket_local_client(SOCKET_NAME_SEND, ANDROID_SOCKET_NAMESPACE_ABSTRACT,SOCK_STREAM);
         if (vdev->send_fd < 0) {
             ALOGW("cannot open validity service!");
             sleep(1);
         }
     }
+    // shortcut: a hung ValidityService must not block callers forever, 5 s is arbitrary
+    struct timeval tv = {5, 0};
+    setsockopt(vdev->send_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     uint8_t command[1] = {CALL_INITSERVICE};
 
     ret = sendcommand(vdev, command, 1);
@@ -163,10 +173,23 @@ static void send_authenticated_notice(vcs_fingerprint_device_t* vdev, int fid) {
     return;
 }
 
+static void send_enumerate_notice(vcs_fingerprint_device_t* vdev, int fid, uint32_t remaining) {
+    fingerprint_msg_t msg;
+    memset(&msg, 0, sizeof(msg));
+    msg.type = FINGERPRINT_TEMPLATE_ENUMERATING;
+    msg.data.enumerated.finger.fid = fid;
+    msg.data.enumerated.remaining_templates = remaining;
+
+    pthread_mutex_lock(&vdev->lock);
+    vdev->device.notify(&msg);
+    pthread_mutex_unlock(&vdev->lock);
+}
+
 static void send_remove_notice(vcs_fingerprint_device_t* vdev, int fid) {
     ALOGV("----------------> %s ----------------->fid=%d", __FUNCTION__, fid);
 
     fingerprint_msg_t msg;
+    memset(&msg, 0, sizeof(msg));
     msg.type = FINGERPRINT_TEMPLATE_REMOVED;
     msg.data.removed.finger.fid = fid;
 
@@ -215,7 +238,10 @@ static int fingerprint_authenticate(struct fingerprint_device *device,
     int ret = 0;
     ALOGI("auth: op_id=%llu ",operation_id);
 
-    checkinit(vdev);
+    if (!checkinit(vdev)) {
+        send_error_notice(vdev, FINGERPRINT_ERROR_HW_UNAVAILABLE);
+        return 0;
+    }
 
     pthread_mutex_lock(&vdev->lock);
 
@@ -241,7 +267,8 @@ static int fingerprint_enroll(struct fingerprint_device *device,
     int idx = 1;
     uint8_t command[3] = {CALL_ENROLL, (uint8_t)vdev->active_gid, 0};
 
-    checkinit(vdev);
+    if (!checkinit(vdev))
+        return -EAGAIN;
 
     if (!hat) {
         ALOGW("%s: null auth token", __func__);
@@ -342,6 +369,10 @@ static int fingerprint_enumerate(struct fingerprint_device *device,
 
     vcs_fingerprint_device_t* vdev = (vcs_fingerprint_device_t*)device;
     int num = 0;
+    if (!checkinit(vdev)) {
+        send_enumerate_notice(vdev, 0, 0);
+        return 0;
+    }
     pthread_mutex_lock(&vdev->lock);
 
     int fingermask = getfingermask(vdev);
@@ -353,7 +384,18 @@ static int fingerprint_enumerate(struct fingerprint_device *device,
             num++;
     pthread_mutex_unlock(&vdev->lock);
 
-    return num;
+    // Android 14 waits for ENUMERATING callbacks ending with remaining_templates == 0
+    // (fid 0 when nothing is enrolled), or the HIDL cleanup client never finishes.
+    int left = num;
+    for (idx = 0; idx < MAX_NUM_FINGERS; idx++) {
+        if (!((fingermask >> (idx + 1)) & 1))
+            continue;
+        send_enumerate_notice(vdev, idx + 1, --left);
+    }
+    if (num == 0)
+        send_enumerate_notice(vdev, 0, 0);
+
+    return 0;
 }
 
 static int fingerprint_remove(struct fingerprint_device *device,
@@ -371,7 +413,10 @@ static int fingerprint_remove(struct fingerprint_device *device,
 
     uint8_t command[3] = {CALL_REMOVE, (uint8_t)vdev->active_gid, 0};
 
-    checkinit(vdev);
+    if (!checkinit(vdev)) {
+        send_remove_notice(vdev, fid);
+        return 0;
+    }
 
     if (fid == 0) {
         // Delete all fingerprints
@@ -454,6 +499,8 @@ static void* listenerSocket(void* data) {
     vcs_fingerprint_device_t* vdev = (vcs_fingerprint_device_t*)data;
 
     while (vdev->receive_fd <= 0) {
+        if (getListenerState(vdev) == STATE_EXIT)
+            return NULL;
         vdev->receive_fd = socket_local_client(SOCKET_NAME_RECEIVE, ANDROID_SOCKET_NAMESPACE_ABSTRACT,SOCK_STREAM);
         if (vdev->receive_fd < 0) {
             ALOGW("listener cannot open fingerprint listener service");
@@ -519,13 +566,12 @@ static int fingerprint_close(hw_device_t* device) {
 
     vcs_fingerprint_device_t* vdev = (vcs_fingerprint_device_t*)device;
 
-    checkinit(vdev);
-
     pthread_mutex_lock(&vdev->lock);
     // Ask listener thread to exit
     vdev->listener.state = STATE_EXIT;
     uint8_t command[1] = {CALL_CLEANUP};
-    sendcommand(vdev, command, 1);
+    if (checkinit(vdev))
+        sendcommand(vdev, command, 1);
     pthread_mutex_unlock(&vdev->lock);
 
     pthread_join(vdev->listener.thread, NULL);

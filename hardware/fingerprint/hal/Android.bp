@@ -1,0 +1,15 @@
+cc_library_shared {
+    name: "fingerprint.universal5420",
+    relative_install_path: "hw",
+    srcs: ["fingerprint.c"],
+    shared_libs: [
+        "liblog",
+        "libcutils",
+    ],
+    header_libs: ["libhardware_headers"],
+    cflags: [
+        "-Wno-unused-parameter",
+        "-Wno-error",
+    ],
+    vendor: true,
+}

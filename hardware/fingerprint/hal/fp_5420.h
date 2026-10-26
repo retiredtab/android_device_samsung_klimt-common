@@ -76,7 +76,7 @@ static __inline__ int fd_read(int fd, void* buff, int len){
 	return len2;
 }
 
-static void checkinit(vcs_fingerprint_device_t* vdev);
+static bool checkinit(vcs_fingerprint_device_t* vdev);
 static int sendcommand(vcs_fingerprint_device_t* vdev, uint8_t* command, int num);
 static int getfingermask(vcs_fingerprint_device_t* vdev);
 static int initService(vcs_fingerprint_device_t* vdev);
